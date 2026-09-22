@@ -1298,26 +1298,13 @@ verifierad.
 
 ------------------------------------------------------------------------
 
-## 31. Slutresultat
+-
 
-Workshop 3 har resulterat i en fungerande miljö där:
+## 31. Härdning med att ta bort gamla SSH konton
 
--   primary kör K3s
--   nätverk och DNS fungerar
--   Headscale/Tailscale kopplar GitHub-runnern till det privata nätet
--   reverse proxy kan nås via tailnet
--   GitHub Actions kan nå K3s och applicera manifest
--   applikationen körs i K3s
--   poden har verifierats `1/1 Running`
--   `/healthz` rapporterar healthy
--   den skarpa webbplatsen svarar med HTTP 200
--   GHCR-problemet har identifierats och en lokal-image-workaround
-    används
--   HostPort-konflikten har identifierats
--   `Recreate` har lagts till i repo-manifestet
--   senaste GitHub Actions-körningen är `Success`
--   IDOR-sårbarheten har identifierats och dokumenterats
--   workshopflaggan har hittats via IDOR
+vi tog bort gamla SSH inloggningar så att dom inte kan bli utnyttjade i framtiden.
+
+Att minska attack området är kritiskt för att ha en säker miljö
 
 ------------------------------------------------------------------------
 
@@ -1338,6 +1325,7 @@ Säkerhetstestningen identifierade dessutom en IDOR-sårbarhet som
 exponerade andra användares interna profilinformation och ledde till
 workshopflaggan.
 
+Härdade kod
 ### Senaste verifierade pipeline
 
 ``` text
