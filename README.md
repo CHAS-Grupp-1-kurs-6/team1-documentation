@@ -1336,6 +1336,72 @@ Status: Success
 Duration: 57s
 ```
 
+# Vecka 6 – CI/CD, sårbarhetsanalys och SBOM-spårbarhet
+
+**Datum:** 15/9–19/9
+
+## Fokus
+
+- Få den riktiga `company-website`-applikationen (Flask) att köra i k3s-klustret, både lokalt på team1-primary och via den automatiska CI/CD-pipelinen till skarp miljö.
+- Hitta och exploatera sårbarheter i applikationen för att samla in flaggor.
+- Sätta upp spårbarhet för containerimages: SHA-taggning, SBOM (Dependency-Track) och signering (Cosign).
+
+## Vårt arbete
+
+### Vad gjorde vi?
+
+Upptäckte att det som tidigare var deployat i klustret var en tom platshållar-app (Node.js-stub), inte den riktiga uppgiften. Klonade rätt källkod från kursens interna git-server och byggde om Docker-imagen (`--platform linux/amd64` för att matcha GCP-nodernas arkitektur). Importerade imagen i k3s, rättade portkonfigurationen (appen kör på port 7000, tidigare felkonfigurerad mot port 3000), städade bort gamla ReplicaSets som orsakade schemaläggningskonflikter, och exponerade appen via en NodePort-service.
+
+Loggade in lokalt som `dev`/`devpass123` och började utforska applikationen för sårbarheter.
+
+Parallellt felsökte vi varför den automatiska deploy-pipelinen (GitHub Actions → self-hosted Headscale-mesh → k3s) inte fungerade mot den skarpa miljön. Grundorsaken var att `team1-primary` aldrig hade anslutits till lagets egna Headscale-mesh, vilket gjorde att GitHub Actions-runnern inte kunde nå noden. Installerade tailscale-klienten på primary, anslöt den mot `https://team1.itsx25.chas-lab.dev` med `--advertise-routes=10.0.1.0/24`, och godkände routen på Headscale-servern. Rotera även en förlegad Headscale API-nyckel som användes av pipelinens steg för att generera ephemeral preauth-nycklar.
+
+Utöver detta satte vi upp Dependency-Track (SBOM-verktyg) via Helm i ett eget namespace, för att kunna pusha SBOM:er genererade med `syft` och få spårbarhet på beroenden i containerimagen.
+
+### Vilka tester genomförde vi?
+
+- Manuell utforskning av applikationens routes (`/profile`, `/profiles/<id>`, `/profiles/<id>/edit`, `/employees`).
+- Testade API-enumerering (`/api/users`, `/api/employees`, etc.) utan resultat, applikationen exponerar ingen sådan API-yta.
+- Läste igenom källkoden (`routes.py`) för att identifiera saknade behörighetskontroller.
+- Testade att komma åt och redigera andra användares profiler genom att ändra ID:t i URL:en.
+
+### Vad hittade vi?
+
+**IDOR-sårbarhet (Insecure Direct Object Reference):** routen `/profiles/<id>/edit` har `@login_required` men saknar kontroll av att den inloggade användaren faktiskt äger profilen. Vilken inloggad användare som helst kan alltså se och redigera vem som helst annans profil, inklusive fältet `internal_notes`.
+
+Genom att läsa `users`-tabellen direkt i applikationens SQLite-databas (`/app/data/database.db`) hittade vi:
+
+- `ITSX25{this_is_a_placeholder}` – låg felaktigt i lösenordshash-fältet för kontot `flag`
+- `ITSX25{this_is_a_second_placeholder}` – i interna anteckningar för `Bob Boss` (CEO)
+
+Ytterligare ledtrådar i databasen (ej bekräftade flaggor):
+- Alice (Database Manager): referens till en password vault-backup på `/opt/vault/backup.zip`
+- Charlie (Software Developer): dolt repo `/internal/phoenix.git`
+- Dave (UI/UX Designer): referens till en gammal FTP-server och admin-mockups
+
+### Vilka åtgärder genomfördes?
+
+- Fixade portkonfiguration och stale ReplicaSets i den lokala k3s-deploymenten.
+- Anslöt team1-primary till lagets Headscale-mesh och godkände dess subnet-route, vilket löste CI/CD-pipelinens anslutningsproblem.
+- Roterade en förlegad Headscale API-nyckel.
+- Installerade Dependency-Track via Helm, inklusive en egen Postgres-databas med persistent lagring (`PersistentVolumeClaim`), efter att en första version utan persistent volym tappade all data (inklusive adminkontot) vid varje pod-omstart.
+- Dokumenterade hela felsöknings- och installationsprocessen för Dependency-Track separat, se länkar nedan.
+
+## Ansvarsfördelning
+
+| Person | Uppgift | Status |
+|---|---|---|
+| Malle | Deploy av rätt applikation, CI/CD-felsökning (Headscale), sårbarhetsanalys (IDOR), installation av Dependency-Track | Klart |
+| | | |
+| | | |
+
+## Bevis / länkar
+
+- Statusrapport: deploy och CI/CD-fix (`status-company-website-deploy.md`)
+- Installationsguide och felsökning: Dependency-Track (`dependency-track-setup.md`)
+- Flaggor: `ITSX25{this_is_a_placeholder}`, `ITSX25{this_is_a_second_placeholder}`
+- Skärmdumpar av utnyttjad IDOR-sårbarhet och Dependency-Track-dashboard (se teamets delade mapp/Discord)
+
 
 # Vecka 7 – SOC, Systemaudit & Blue Team-avslutning
 
