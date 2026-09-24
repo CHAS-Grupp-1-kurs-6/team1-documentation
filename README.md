@@ -1402,6 +1402,155 @@ Ytterligare ledtrådar i databasen (ej bekräftade flaggor):
 - Flaggor: `ITSX25{this_is_a_placeholder}`, `ITSX25{this_is_a_second_placeholder}`
 - Skärmdumpar av utnyttjad IDOR-sårbarhet och Dependency-Track-dashboard (se teamets delade mapp/Discord)
 
+# Workshop 3.5--4 -- Blue Team dokumentation
+
+## Översikt
+
+Under Workshop 3.5--4 har vi arbetat med säkerhet i CI/CD, container
+images, Kubernetes, SBOM, Dependency-Track, Cosign, Sigstore samt
+Ingress och DNS.
+
+Dokumentationen beskriver vad vi har implementerat, testat och vilka
+problem som återstår.
+
+## CI/CD och container image
+
+Vi uppdaterade GitHub Actions så att Docker-imagen byggs och publiceras
+till GHCR. Imagen kopplas till aktuell Git commit och deployment
+använder image digest.
+
+### Testat
+
+-   GitHub Actions-pipeline kördes.
+-   Docker-image byggdes och pushades till GHCR.
+-   Deployment till Kubernetes genomfördes.
+-   Kubernetes kör imagen via SHA256-digest.
+-   Applikationen startade och fungerade efter deployment.
+
+**Status:** Klar.
+
+## Cosign och image signing
+
+Vi använde Cosign för att signera container-imagen via GitHub Actions.
+
+### Testat
+
+-   Automatisk signering genom CI/CD.
+-   Signaturen verifierades med `cosign verify`.
+-   Keyless-signeringen kunde kopplas till GitHub Actions-workflowen.
+
+**Status:** Signering och manuell verifiering fungerar.
+
+## Sigstore Policy Controller
+
+Vi installerade Sigstore Policy Controller i Kubernetes och skapade en
+`ClusterImagePolicy` för `company-website`.
+
+### Testat
+
+-   Policy Controller är installerad och kör.
+-   Policyn rapporterar `Ready=True`.
+-   Admission aktiverades.
+-   `latest` testades och nekades eftersom policyn kräver image digest.
+-   Imagen testades med SHA256-digest.
+-   `ghcr-secret` lades till som `imagePullSecret`.
+-   Kubernetes kunde dra och starta den privata imagen.
+
+### Problem
+
+Policy Controller kan inte verifiera signaturen mot privata GHCR
+eftersom autentiseringen misslyckas med `DENIED: denied`.
+
+Policyn lämnades därför i:
+
+``` yaml
+mode: warn
+```
+
+Det visar verifieringsproblemet utan att stoppa den fungerande
+applikationen.
+
+**Status:** Installerad och testad. Private GHCR enforcement är i
+`warn`.
+
+## SBOM med Syft
+
+Vi installerade Syft och genererade en SBOM för `company-website` i
+CycloneDX JSON-format.
+
+Fil:
+
+``` text
+sbom.cdx.json
+```
+
+### Testat
+
+-   Syft kördes mot container-imagen.
+-   SBOM-filen skapades.
+-   SBOM innehåller information om paket och dependencies i imagen.
+
+**Status:** Klar.
+
+## Dependency-Track
+
+Vi installerade Dependency-Track i Kubernetes tillsammans med
+PostgreSQL.
+
+### Testat
+
+-   API-server kör.
+-   Frontend kör.
+-   PostgreSQL kör.
+-   API testades och svarade med HTTP 200.
+-   Dependency-Track version 5.1.1 verifierades.
+-   Port-forwarding till API och frontend testades.
+
+### Problem
+
+SBOM-filen har ännu inte importerats till Dependency-Track. Vi fastnade
+på frontend/inloggning och API-autentisering.
+
+**Status:** Backend och API fungerar. SBOM-import återstår.
+
+## nginx Ingress och DNS
+
+Vi installerade nginx Ingress och skapade en Ingress för
+webbapplikationen.
+
+Hostname:
+
+``` text
+company-website.team1.arpa
+```
+
+DNS konfigurerades via Headscale/MagicDNS.
+
+### Testat
+
+-   DNS-namnet slår upp till `10.0.1.3`.
+-   Ingress skickar trafik till `company-website`.
+-   Webbplatsen svarar via `company-website.team1.arpa`.
+-   Applikationen kör korrekt i Kubernetes.
+
+**Status:** Klar.
+
+## Sammanfattning
+
+Implementerat och testat: - Git SHA/image digest i CI/CD och
+deployment - GHCR container image - Cosign-signering och verifiering -
+Sigstore Policy Controller - Syft och CycloneDX SBOM - Dependency-Track
+med PostgreSQL - nginx Ingress - Headscale/MagicDNS
+
+### Kvarstående punkter
+
+1.  Importera `sbom.cdx.json` till Dependency-Track.
+2.  Lösa Sigstore Policy Controllers autentisering mot privata
+    GHCR-images om full enforcement krävs.
+
+Sigstore är tills vidare konfigurerat i `warn`-läge så att problemet
+dokumenteras utan att stoppa deploymenten.
+
 
 # Vecka 7 – SOC, Systemaudit & Blue Team-avslutning
 
