@@ -1551,87 +1551,467 @@ med PostgreSQL - nginx Ingress - Headscale/MagicDNS
 Sigstore är tills vidare konfigurerat i `warn`-läge så att problemet
 dokumenteras utan att stoppa deploymenten.
 
+# Workshop 4 -- Lag 1
 
-# Vecka 7 – SOC, Systemaudit & Blue Team-avslutning
+## Sammanfattning
 
-**Datum:** 28/9–2/10
+Under Workshop 4 arbetade Lag 1 vidare med säkerhet i CI/CD-pipelinen,
+loggning, signering av container-images, SBOM, deployment till K3s samt
+säkerhetsgranskning av applikationen.
 
-## Fokus
+Vi stötte på flera problem under arbetet, framför allt kring privat
+GHCR-åtkomst, Sigstore/Cosign och OS Login-loggar. Problemen felsöktes
+och löstes. Den slutliga pipelinen, säkerhetsfixarna och deploymenten
+verifierades.
 
-- SOC
-- Systemaudit
-- Wazuh
-- SIEM
-- Logginsamling
-- Säkerhetsgranskning
-- Sårbarheter
-- Slutrapport
+------------------------------------------------------------------------
 
-## Planerade moment
+## 1. SBOM
 
-### Pass 1 – Workshop
-**28/9 09:00–13:00**
+Vi lade till automatisk generering av en CycloneDX-SBOM i GitHub
+Actions.
 
-- Wazuh som SIEM
-- Implementering av logginsamling
-- Säkerhetsgranskning
+SBOM genereras från den image som byggs i pipelinen.
 
-### Pass 2 – Labb & rapporthandledning
-**29/9 13:00–17:00**
+**Resultat:** - CycloneDX SBOM genereras automatiskt. - SBOM kopplas
+till rätt image-digest. - Steget körs framgångsrikt i GitHub Actions.
 
-- Slutföra Wazuh-konfiguration
-- Stänga sista sårbarheterna
-- Sammanställa samtliga fynd
-- Förbereda slutrapport
+**Status:** ✅ Klar
 
-### Pass 3 – Blue Team-inlämning & Retro
-**1/10 13:00–15:00**
+------------------------------------------------------------------------
 
-- Redovisning av slutlig säkerhetsstatus
-- Härdningsgrad
-- Retrospektiv
+## 2. Cosign -- signering och attestation
 
-## Vårt arbete
+Vi använde Cosign för att signera container-imagen och skapa en
+attestation baserad på SBOM-filen.
 
-### Vad implementerade vi?
+Verifiering genomfördes bland annat med:
 
-> Skriv här.
+``` bash
+cosign tree <image>
+cosign verify-attestation <image>
+```
 
-### Vad övervakade vi?
+Verifieringen lyckades och `cosign verify-attestation` returnerade exit
+code 0.
 
-> Skriv här.
+**Status:** ✅ Klar
 
-### Vilka findings identifierade vi?
+------------------------------------------------------------------------
 
-> Skriv här.
+## 3. Problem -- privat GHCR-image
 
-### Vilka issues återstår?
+### Problem
 
-> Skriv här.
+Deploymenten misslyckades först i steget:
 
-### Vilka problem har åtgärdats?
+``` text
+Apply manifests and update image
+```
 
-> Skriv här.
+Vi fick bland annat:
 
-## Ansvarsfördelning
+``` text
+DENIED: requested access to the resource is denied
+signature keyless validation failed
+```
 
-| Person | Uppgift | Status |
-|---|---|---|
-| | | ☐ Klar |
-| | | ☐ Klar |
-| | | ☐ Klar |
-| | | ☐ Klar |
-| | | ☐ Klar |
+K3s-podden hamnade även i:
 
-## Bevis / länkar
+``` text
+ErrImagePull
+```
 
-- Wazuh:
-- PR:
-- Issue:
-- Commit:
-- Screenshot:
-- Logg:
-- Slutrapport:
+### Felsökning
+
+Vi kontrollerade:
+
+-   GHCR-autentisering
+-   GitHub-token
+-   Kubernetes `ghcr-secret`
+-   Sigstore `ClusterImagePolicy`
+-   nätverksanslutningen
+-   Tailscale
+-   Cosign-signaturen
+
+Vi uppdaterade även `ghcr-secret` med fungerande GitHub-autentisering.
+
+Problemet kvarstod eftersom Sigstore/policy-controller fortfarande inte
+kunde hämta signaturinformationen från det privata GHCR-paketet.
+
+### Lösning
+
+Enligt tidigare workshop skulle `company-website`-paketet vara publikt.
+Vi ändrade därför GHCR-paketet:
+
+``` text
+company-website
+Private → Public
+```
+
+Efter detta kunde Sigstore läsa signaturen och deploymenten lyckades.
+
+**Status:** ✅ Löst
+
+------------------------------------------------------------------------
+
+## 4. Deployment till K3s
+
+Efter GHCR-fixen kördes GitHub Actions-pipelinen igen.
+
+Resultat:
+
+``` text
+Apply manifests and update image ✓
+Complete job ✓
+Deploy to K3s: success
+```
+
+Vi verifierade därefter podden:
+
+``` bash
+sudo k3s kubectl get pods
+```
+
+Resultat:
+
+``` text
+READY   STATUS
+1/1     Running
+```
+
+**Status:** ✅ Klar
+
+------------------------------------------------------------------------
+
+## 5. Company Website -- Service och Ingress
+
+Vi kontrollerade Kubernetes Service och Ingress:
+
+``` bash
+sudo k3s kubectl get svc,ingress -o wide
+```
+
+Resultat:
+
+``` text
+Service:
+company-website
+ClusterIP: 10.43.167.126
+Port: 7000
+
+Ingress:
+website-ingress
+Host: company-website.team1.arpa
+Address: 10.0.1.3
+Port: 80
+```
+
+Applikationen nås via:
+
+``` text
+http://company-website.team1.arpa
+```
+
+Trafikflödet är:
+
+``` text
+company-website.team1.arpa
+        ↓
+Ingress – 10.0.1.3:80
+        ↓
+Kubernetes Service
+        ↓
+company-website – port 7000
+```
+
+**Status:** ✅ Klar
+
+------------------------------------------------------------------------
+
+## 6. OS Login och loggning
+
+Vi verifierade att OS Login var aktiverat och skapade sedan en ny
+SSH-inloggning mot `team1-jumphost`.
+
+Exempel:
+
+``` bash
+gcloud compute ssh team1-jumphost \
+  --zone=europe-north2-a \
+  --project=itsx25-lab
+```
+
+Därefter sökte vi i Google Cloud Logging:
+
+``` bash
+gcloud logging read \
+'protoPayload.serviceName="oslogin.googleapis.com"' \
+--project=itsx25-lab \
+--freshness=30m \
+--limit=20
+```
+
+Vi fick träff på:
+
+``` text
+google.cloud.oslogin.dataplane.OsLoginDataPlaneService.CheckPolicy
+```
+
+För Lag 1 verifierades bland annat:
+
+``` text
+INSTANCE: team1-jumphost
+POLICY: LOGIN
+```
+
+Vi använde även ett mer specifikt filter:
+
+``` text
+protoPayload.serviceName="oslogin.googleapis.com"
+protoPayload.methodName=~"CheckPolicy"
+protoPayload.request.instance=~"team1-(jumphost|primary)"
+protoPayload.request.policy="LOGIN"
+```
+
+Resultatet visade färska `LOGIN`-händelser för `team1-jumphost`, vilket
+bekräftade att OS Login-händelser registreras korrekt i Google Cloud
+Logging.
+
+**Status:** ✅ Klar
+
+------------------------------------------------------------------------
+
+## 7. Säkerhetsgranskning -- SQL Injection
+
+Vi identifierade en SQL Injection-sårbarhet i:
+
+``` text
+src/company_website/auth.py
+```
+
+Den ursprungliga implementationen byggde SQL-frågan direkt från
+användarinput:
+
+``` python
+query = f"SELECT * FROM legacy_users WHERE username = '{username}' AND password_hash = '{password}'"
+cursor.execute(query)
+```
+
+Detta ersattes med en parameteriserad SQL-fråga:
+
+``` python
+query = "SELECT * FROM legacy_users WHERE username = ? AND password_hash = ?"
+cursor.execute(query, (username, password))
+```
+
+Det gör att användarinput behandlas som data istället för SQL-kod och
+minskar risken för SQL Injection.
+
+**Status:** ✅ Patchad
+
+------------------------------------------------------------------------
+
+## 8. Säkerhetsgranskning -- Template Injection
+
+Vi identifierade även risk för Server-Side Template Injection i:
+
+``` text
+src/company_website/routes.py
+```
+
+Användarstyrd template-data skickades tidigare till:
+
+``` python
+render_template_string()
+```
+
+Vi ändrade implementationen så att användarens template inte längre
+exekveras direkt som en Jinja-template.
+
+Istället tillåts endast de avsedda variablerna:
+
+``` text
+firstname
+lastname
+email
+role
+company
+```
+
+Variablerna ersätts explicit av applikationen istället för att
+användarinput exekveras som template-kod.
+
+**Status:** ✅ Patchad
+
+------------------------------------------------------------------------
+
+## 9. Testning av säkerhetsfixar
+
+Efter ändringarna kontrollerade vi först Python-syntaxen med
+`py_compile`.
+
+Vid första försöket att köra `pytest` upptäcktes en konflikt eftersom
+det fanns två `test_app.py` i olika kataloger:
+
+``` text
+./tests/test_app.py
+./company-website/tests/test_app.py
+```
+
+Vi verifierade med Git vilka tester som tillhörde det aktuella repot och
+körde därefter rätt testkatalog:
+
+``` bash
+PYTHONPATH=src venv/bin/python -m pytest tests/ -v
+```
+
+Resultat:
+
+``` text
+collected 11 items
+11 passed
+```
+
+Samtliga tester passerade efter både SQL Injection- och Template
+Injection-fixarna.
+
+**Status:** ✅ Klar
+
+------------------------------------------------------------------------
+
+## 10. Commit och slutlig pipeline
+
+Säkerhetsfixarna lades till och committades:
+
+``` bash
+git add src/company_website/auth.py src/company_website/routes.py
+git commit -m "Patch SQL injection and template injection vulnerabilities"
+git push github main
+```
+
+Commit:
+
+``` text
+8e0e55f
+```
+
+Commit-meddelande:
+
+``` text
+Patch SQL injection and template injection vulnerabilities
+```
+
+Push till `main` startade GitHub Actions-pipelinen på nytt.
+
+Slutresultat:
+
+``` text
+Deploy to K3s
+Status: Success
+```
+
+Den nya versionen byggdes och deployades framgångsrikt efter
+säkerhetsändringarna.
+
+**Status:** ✅ Klar
+
+------------------------------------------------------------------------
+
+## 11. Problem och lösningar -- sammanställning
+
+  -------------------------------------------------------------------------------------
+  Problem              Orsak                        Lösning           Resultat
+  -------------------- ---------------------------- ----------------- -----------------
+  GHCR `DENIED`        `company-website` var privat Ändrade           Löst
+                                                    GHCR-paketet till 
+                                                    Public            
+
+  Sigstore signature   Policy-controller kunde inte Gjorde paketet    Löst
+  validation failed    läsa signaturen från privat  publikt           
+                       GHCR                                           
+
+  `ErrImagePull`       Klustret kunde inte hämta    GHCR-åtkomst      Löst
+                       nödvändiga                   korrigerades      
+                       image/signaturresurser                         
+
+  OS Login gav         Ingen relevant färsk         Ny SSH-inloggning Löst
+  tidigare inga        händelse syntes i tidigare   skapades och      
+  träffar              sökning                      loggar söktes     
+                                                    igen              
+
+  SQL Injection        SQL byggdes med direkt       Parameteriserad   Patchad
+                       användarinput                query             
+
+  Template Injection   Användarinput skickades till Explicit          Patchad
+                       `render_template_string()`   ersättning av     
+                                                    tillåtna          
+                                                    variabler         
+
+  Pytest collection    Två `test_app.py` hittades   Tester kördes     Löst
+  conflict                                          från repots       
+                                                    riktiga `tests/`  
+
+  Python-indentering   Fel indentering vid manuell  Indentering       Löst
+  efter SQL-patch      redigering                   korrigerades och  
+                                                    verifierades med  
+                                                    `py_compile`      
+  -------------------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+## 12. Slutresultat
+
+Workshop 4 genomfördes med följande resultat:
+
+-   ✅ CycloneDX SBOM
+-   ✅ Cosign attestation
+-   ✅ Cosign image signing
+-   ✅ Signatur och attestation verifierade
+-   ✅ GHCR/Sigstore-problem felsökt och löst
+-   ✅ GitHub Actions pipeline fungerar
+-   ✅ Deployment till K3s fungerar
+-   ✅ Pod verifierad som `1/1 Running`
+-   ✅ Service och Ingress verifierade
+-   ✅ `company-website.team1.arpa` verifierad som Ingress-host
+-   ✅ OS Login-loggning verifierad
+-   ✅ `CheckPolicy` och `LOGIN` verifierade för `team1-jumphost`
+-   ✅ SQL Injection identifierad och patchad
+-   ✅ Template Injection identifierad och patchad
+-   ✅ 11/11 tester godkända
+-   ✅ Säkerhetsfixarna committade och pushade
+-   ✅ Slutlig GitHub Actions-pipeline `Success`
+
+------------------------------------------------------------------------
+
+## 13. Lärdomar
+
+Workshopen gav praktisk erfarenhet av hela kedjan från säker CI/CD till
+drift, övervakning och säker kodgranskning.
+
+Ett viktigt problem var att en fungerande image-signering inte
+automatiskt innebär att klustret kan verifiera signaturen. GHCR-paketets
+åtkomstnivå påverkade Sigstore/policy-controllerns möjlighet att hämta
+signaturen.
+
+Vi fick även arbeta praktiskt med:
+
+-   SBOM och software supply chain security
+-   Cosign och keyless signing
+-   Sigstore policy enforcement
+-   GHCR och container registry-behörigheter
+-   GitHub Actions
+-   Kubernetes/K3s
+-   Service och Ingress
+-   Google Cloud OS Login och audit-loggar
+-   SQL Injection
+-   Server-Side Template Injection
+-   automatiserad testning efter säkerhetsändringar
+
+Genom att testa applikationen efter patchning och därefter köra hela
+CI/CD-pipelinen kunde vi verifiera både att säkerhetsproblemen
+åtgärdades och att applikationen fortfarande fungerade efter
+ändringarna.
 
 ---
 
