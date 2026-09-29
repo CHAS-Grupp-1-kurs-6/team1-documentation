@@ -4,7 +4,7 @@ Dokumentation för Lag 1 under **Kurs 6 – Avancerad IT-säkerhet**.
 
 Detta repository används för att samla dokumentation från Blue Team-arbetet under vecka 4–8. Här dokumenterar vi vad vi har gjort, vilka tester vi har genomfört, vilka findings vi har identifierat och hur problemen har hanterats.
 
----
+--
 
 ## 📌 Projektinformation
 
@@ -2012,8 +2012,6 @@ Genom att testa applikationen efter patchning och därefter köra hela
 CI/CD-pipelinen kunde vi verifiera både att säkerhetsproblemen
 åtgärdades och att applikationen fortfarande fungerade efter
 ändringarna.
-
----
 
 # Vecka 8 – Threat Intelligence & Halvtidsavstämning
 
