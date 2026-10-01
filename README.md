@@ -2286,3 +2286,197 @@ Ytterligare ledtrådar i databasen (ej bekräftade flaggor):
 - Installationsguide och felsökning: Dependency-Track (`dependency-track-setup.md`)
 - Flaggor: `ITSX25{this_is_a_placeholder}`, `ITSX25{this_is_a_second_placeholder}`
 - Skärmdumpar av utnyttjad IDOR-sårbarhet och Dependency-Track-dashboard (se teamets delade mapp/Discord)
+
+# Workshop 4 -- Lag 1
+
+## Supply Chain Security Scanner -- Kubernetes CronJob
+
+Som sista del av Workshop 4 implementerade Lag 1 en automatiserad
+sårbarhetsskanner i K3s. Målet var att automatiskt hämta SBOM för den
+driftsatta applikationen, analysera den med Trivy och skicka resultatet
+till Discord.
+
+### Kubernetes-resurser
+
+Följande resurser skapades i namespace `security-tools`:
+
+-   Secret: `sbom-vulnerability-scanner-secrets`
+-   ServiceAccount: `sbom-scanner-sa`
+-   ClusterRole: `sbom-scanner-pod-reader`
+-   ClusterRoleBinding: `sbom-scanner-pod-reader-binding`
+-   CronJob: `sbom-vulnerability-scanner`
+
+CronJobben är konfigurerad med schemat `0 12 * * *`, vilket innebär att
+scanningen körs automatiskt varje dag kl. 12:00.
+
+### RBAC
+
+En separat ServiceAccount, `sbom-scanner-sa`, används enligt principen
+om least privilege. Den får endast läsa och lista pods som behövs för
+att identifiera den driftsatta applikationen.
+
+``` bash
+sudo k3s kubectl auth can-i list pods --namespace=default --as=system:serviceaccount:security-tools:sbom-scanner-sa
+```
+
+Resultat:
+
+``` text
+yes
+```
+
+### Identifiering av aktuell container-image
+
+Scannern använder Kubernetes API för att hitta pods med label
+`app=company-website` och hämtar därefter `imageID` från den körande
+containern.
+
+Under sluttestet identifierades:
+
+`ghcr.io/chas-grupp-1-kurs-6/company-website@sha256:b7dab40e5b0d0ab38f8f8334db6f199abea46901cb7407765562259332dd946e`
+
+Det gör att scanningen utförs mot exakt den image-version som körs i
+klustret.
+
+### Cosign och SBOM
+
+Cosign används för att hämta SBOM-attestationen som skapats i
+CI/CD-pipelinen. SBOM-formatet är `CycloneDX JSON` och informationen
+extraheras till `/tmp/sbom.json`.
+
+### Trivy vulnerability scanning
+
+SBOM-filen analyseras automatiskt med Trivy. Under sluttestet lyckades
+Trivy:
+
+-   ladda ner vulnerability-databasen
+-   identifiera CycloneDX JSON
+-   identifiera Debian 13
+-   analysera operativsystemspaket
+-   analysera Python-paket
+-   kontrollera efter kända sårbarheter
+
+``` text
+Artifact successfully downloaded
+Vulnerability scanning is enabled
+Detected SBOM format format="cyclonedx-json"
+Detected OS family="debian" version="13"
+[debian] Detecting vulnerabilities...
+[python-pkg] Detecting vulnerabilities...
+```
+
+Resultatet filtreras efter HIGH och CRITICAL.
+
+### Discord-notifiering
+
+Resultatet skickas automatiskt till Discord via webhook. Webhook-URL:en
+lagras som Kubernetes Secret och finns därför inte direkt i
+CronJob-konfigurationen.
+
+Vid första testet innehöll Kubernetes Secret hela JSON-svaret från
+Discord i stället för endast webhook-URL:en, vilket gav ett curl-fel.
+Webhooken regenererades och Secret uppdaterades med endast den korrekta
+URL:en. Därefter kunde scanner-jobbet genomföras korrekt och
+Discord-integrationen verifierades.
+
+### Manuellt test av CronJob
+
+``` bash
+sudo k3s kubectl create job \
+  --from=cronjob/sbom-vulnerability-scanner \
+  sbom-scan-test \
+  -n security-tools
+```
+
+Scanner-podden startade med `1/1 Running` och `0` restarts.
+
+Den verifierade kedjan var:
+
+**Kubernetes API → Running workload → Image digest → Cosign → SBOM →
+Trivy → Discord**
+
+### Resursproblem och felsökning
+
+Under testningen uppstod periodvis `net/http: TLS handshake timeout`
+samt instabilitet i K3s och DNS. `team1-primary` hade begränsade
+minnesresurser och Dependency-Track konkurrerade med K3s om resurser.
+
+Dependency-Track API och frontend skalades därför tillfälligt ned:
+
+``` bash
+sudo k3s kubectl -n dtrack scale deployment dependency-track-api-server --replicas=0
+sudo k3s kubectl -n dtrack scale deployment dependency-track-frontend --replicas=0
+```
+
+Efter scanner-testet återställdes de:
+
+``` bash
+sudo k3s kubectl -n dtrack scale deployment dependency-track-api-server --replicas=1
+sudo k3s kubectl -n dtrack scale deployment dependency-track-frontend --replicas=1
+```
+
+### Slutkontroll
+
+K3s-noden verifierades:
+
+``` text
+NAME            STATUS   ROLES           VERSION
+team1-primary   Ready    control-plane   v1.36.4+k3s1
+```
+
+Dependency-Track verifierades:
+
+``` text
+dependency-track-api-server   1/1   Running
+dependency-track-frontend     1/1   Running
+postgresql                    1/1   Running
+```
+
+Frontend hade en restart under uppstarten men återhämtade sig till
+`1/1 Running`.
+
+## Slutresultat Workshop 4
+
+Lag 1 har arbetat med och verifierat:
+
+-   CI/CD-säkerhet
+-   CycloneDX SBOM
+-   Container image digest
+-   Cosign-signering och attestation
+-   Sigstore
+-   GHCR
+-   K3s deployment
+-   Kubernetes RBAC och least privilege
+-   Dependency-Track
+-   Trivy vulnerability scanning
+-   Kubernetes CronJob
+-   Kubernetes Secrets
+-   Discord-notifiering
+-   OS Login
+-   SQL Injection-skydd
+-   SSTI-skydd
+-   Automatiserade tester
+
+Applikationens säkerhetsfixar verifierades tidigare med
+`11/11 tests passed`.
+
+Den slutliga supply chain-kedjan:
+
+**GitHub Actions → Container Image → GHCR → Image Digest → CycloneDX
+SBOM → Cosign Signature/Attestation → K3s Deployment → CronJob → Trivy
+SBOM Scan → Discord Alert**
+
+### Slutstatus
+
+Workshop 4 är tekniskt genomförd och verifierad.
+
+-   CTF: 10/10 flaggor
+-   Company Website: Running
+-   K3s node: Ready
+-   SBOM: verifierad
+-   Cosign: verifierad
+-   Trivy: verifierad
+-   CronJob: verifierad
+-   Discord-notifiering: verifierad
+-   Dependency-Track: återställd och Running
+message.txt
