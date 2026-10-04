@@ -2013,6 +2013,269 @@ CI/CD-pipelinen kunde vi verifiera både att säkerhetsproblemen
 åtgärdades och att applikationen fortfarande fungerade efter
 ändringarna.
 
+# Leveling up – Team 1 säkerhetshärdning
+
+Kurs 6, Avancerad IT-säkerhet · 2026-10-04 och 2026-10-05 · Malcolm Skoglund
+
+## Sammanfattning
+
+Alla 12 uppgifter i Leveling up är genomförda och sluttestet den 5 oktober 2026 gav 0 fel. Under arbetet hittade vi och åtgärdade flera allvarliga brister som låg utanför uppgifterna.
+
+De viktigaste resultaten:
+
+- Jumphosten var öppen för all trafik från internet. Nu är ingen regel öppen mot 0.0.0.0/0 och SSH går bara via IAP eller Tailscale.
+- CI/CD-kontot hade `roles/editor` på hela det delade GCP-projektet. Nu har det tre smala compute-roller och skrivrätt endast till den egna state-bucketen.
+- Deployen använde statisk kubeconfig med cluster-admin och en Headscale admin-nyckel. Nu använder den GitHub OIDC med rätt bara till den egna appen.
+- Policy-controllern för Cosign hade kraschat 915 gånger på 10 dagar. Orsaken var att primary bara nådde internet via jumphosten. Cloud NAT löste det.
+- Containern kör nu som UID 10001 med skrivskyddad kod och read-only filsystem.
+- En Discord-webhook låg i klartext i bash-historiken. Den är roterad.
+
+## Miljö och utgångsläge
+
+Alla lag delar GCP-projektet `itsx25-lab`. Team 1 har eget VPC och subnät.
+
+| Del | Värde |
+| --- | --- |
+| GCP-projekt | `itsx25-lab`, region `europe-north2`, zon `europe-north2-a` |
+| Nätverk | `team1-vpc`, subnät `team1-subnet` 10.0.1.0/24 |
+| Jumphost | `team1-jumphost`, 10.0.1.2, extern IP 34.51.158.253, Tailscale 100.64.0.1 |
+| Primary | `team1-primary`, 10.0.1.3, ingen extern IP, Tailscale 100.64.0.8, k3s |
+| Headscale | v0.29.3 på jumphosten, port 8080, nås via lärarens proxy 10.0.0.2 (`team1.itsx25.chas-lab.dev`) |
+| Infrastruktur-repo | `CHAS-Grupp-1-kurs-6/team1-infra` (Terraform) |
+| App-repo | `CHAS-Grupp-1-kurs-6/company-website` (Flask, deploy till k3s) |
+| CI/CD-konto | `team1-cicd@itsx25-lab.iam.gserviceaccount.com`, WIF från GitHub |
+| Schema | `team1-daily-schedule` stänger av VM:arna 22:00 UTC |
+
+Utgångsläget den 4 oktober: brandväggsregeln `team1-allow-traffic` släppte in alla protokoll från 0.0.0.0/0 till båda VM:arna, och primary nådde internet via en route genom jumphosten.
+
+## Punkt 1: Bash-genvägar
+
+Testade genvägarna i terminalen: `Ctrl+R` (sök i historiken), `Ctrl+A`/`Ctrl+E` (början/slutet av raden), `Ctrl+W`/`Ctrl+U`/`Ctrl+Y` (radera och klistra tillbaka), `sudo !!` och `!$`.
+
+När vi använde `history` för att öva hittade vi en Discord-webhook i klartext (se Fynd).
+
+## Punkt 2: Brandvägg, Cloud NAT och least privilege
+
+Ingen brandväggsregel på `team1-vpc` är längre öppen mot internet, och CI/CD-kontot har inte längre `roles/editor`.
+
+### Brandvägg
+
+| Regel | Källa | Tillåter | Mål | Ändring |
+| --- | --- | --- | --- | --- |
+| `team1-allow-traffic` | 0.0.0.0/0 | alla protokoll | jumphost, primary | Borttagen |
+| `team1-allow-iap-ssh` | 35.235.240.0/20 | tcp:22 | jumphost, primary | Ny, SSH bara via Google IAP |
+| `team1-allow-headscale-proxy` | 10.0.0.2/32 | tcp:8080 | jumphost | Ny, lärarens proxy till Headscale |
+| `team1-allow-internal` | 10.0.1.0/24 | alla | jumphost, primary | Oförändrad, trafik inom subnätet |
+| `team1-allow-internal-to-jumphost` | 10.0.1.0/24 | alla | jumphost | Oförändrad |
+
+IAP-regeln skapades och testades innan den öppna regeln togs bort, så att vi inte kunde låsa ute oss.
+
+### Cloud NAT i stället för jumphost-NAT
+
+Routen `team1-internet-via-jumphost` (0.0.0.0/0, priority 800, tagg `no-external-ip`) skickade all internettrafik från primary genom jumphosten. Vi ersatte den med Cloud Router `team1-router` och Cloud NAT `team1-nat`. Primary når nu internet oberoende av jumphosten (HTTP 200 mot tuf-repo-cdn.sigstore.dev). Routen `team1-tailnet-via-jumphost` (100.64.0.0/10) finns kvar för returtrafiken till tailnet.
+
+### Least privilege för CI/CD-kontot
+
+| Före | Efter |
+| --- | --- |
+| `roles/editor` på hela projektet | `roles/compute.instanceAdmin.v1` (VM:ar, schema) |
+| | `roles/compute.networkAdmin` (routes, router, NAT, adresser) |
+| | `roles/compute.securityAdmin` (brandväggsregler) |
+| | `roles/storage.objectAdmin`, bara på bucketen `team1-tfstate-920afb25` |
+
+Ändringen gjordes i `bootstrap/main.tf` och applicerades lokalt (4 add, 1 destroy). Rollerna `InstanceIAMManager` och `iam.serviceAccountUser` fanns sedan tidigare och behövs. IAM Recommender är aktiverad för att över tid visa vilka behörigheter som faktiskt används.
+
+### Terraform
+
+Alla ändringar är också inlagda i koden, annars hade nästa deploy återskapat dem.
+
+- **PR #25 `fix/network-hardening`:** tar bort `allow_traffic` och `internet_via_jumphost` ur `main.tf`. Ny fil `network-hardening.tf` med Cloud NAT, IAP-regel och Headscale-regel, importerade med `import`-block. Planen gav 4 import, 2 change, 0 destroy.
+- **PR #26 `fix/cicd-least-privilege`:** byter `roles/editor` mot rollerna ovan.
+- Planen visade att Terraform skulle stänga av OS Login på primary, eftersom det aktiverats manuellt. Vi lade till `enable-oslogin = "TRUE"` i koden innan push.
+
+## Punkt 3–7: Säker åtkomst
+
+Alla fem åtkomstvägar fungerar utan publik SSH-port.
+
+| # | Uppgift | Hur det fungerar | Resultat |
+| --- | --- | --- | --- |
+| 3 | OS Login på `team1-primary` | `enable-oslogin=TRUE` i metadata. Åtkomst styrs av Google IAM, metadata-nycklar ignoreras (sshd visar `authorized keys '/dev/null'`). | Aktivt på primary och jumphost |
+| 4 | Tailscale till primary | Jumphosten annonserar 10.0.1.0/24 som subnet route. Macen når `ssh user@10.0.1.3` direkt via tailnet. | Fungerar |
+| 5 | SSH jump host | `ssh -J user@100.64.0.1 user@10.0.1.3`. Hoppar via jumphostens Tailscale-IP, eftersom publik port 22 är stängd. | Fungerar |
+| 6 | Agent forwarding | `ssh -A -J ...`. Privata nyckeln stannar på Macen, `ssh-add -l` på primary visar nyckeln. | Fungerar |
+| 7 | GCP IAP | `gcloud compute ssh team1-primary --tunnel-through-iap`. Källa 35.235.240.0/20. | Fungerar mot båda VM:arna |
+
+### Svårigheter och lärdomar
+
+- **`ssh -J` kräver inte `-A`.** Med ProxyJump autentiserar Macen sig direkt mot primary genom tunneln. `-A` behövs bara när nyckeln ska användas vidare från primary, till exempel för `git`. Med `-A` kan root på jumphosten använda agenten medan sessionen är uppe.
+- **IAP misslyckades efter omstart med fel 4003.** VM:arna hade stängts av schemat. sshd startade sent vid boot och startades av Googles guest agent. Efter en minut fungerade IAP.
+- **Primary syns inte som peer i tailnet.** Den är registrerad i Headscale (`node.id=8`, user `team1`), men ACL-policyn filtrerar bort den. Åtkomst via subnet route räcker för uppgiften.
+- **Kör inte `gcloud auth login` på en server.** Då hamnar personliga Google-credentials på maskinen.
+
+## Punkt 8–9: Terraform-scanning och Trivy i pipelinen
+
+Terraform-koden har 0 HIGH/CRITICAL, och pipelinen stoppar sårbara images innan de når registret.
+
+### Punkt 8: Terraform security scanning
+
+`trivy config .` i `team1-infra` hittade bara LOW och MEDIUM. Sluttestet kör `trivy config --severity HIGH,CRITICAL --exit-code 1` och gick igenom.
+
+### Punkt 9: Trivy i build-pipelinen
+
+Trivy körs i `company-website`-workflowet efter bygget och före push till GHCR. Pipelinen fallerar vid HIGH eller CRITICAL.
+
+1. Första körningen hittade HIGH och stoppade pipelinen, som avsett.
+2. Vi uppdaterade Debian- och Python-paket samt Werkzeug.
+3. Omtest: 0 HIGH/CRITICAL. Deployen gick grön på 3 min 2 s.
+4. De befintliga stegen för SBOM och Cosign-signering fungerar efter scanningen.
+
+Tillsammans med den dagliga SBOM-kontrollen via Discord blir det två lager: Trivy stoppar kända sårbarheter vid bygget, och cron-jobbet fångar nya sårbarheter i det som redan körs.
+
+## Punkt 10: OIDC och borttagna statiska nycklar
+
+Den enda secret som finns kvar i båda repona är `TS_AUTHKEY`, en begränsad nyckel som bara kan ansluta tillfälliga CI-noder.
+
+| Secret | Repo | Risk om den läcker | Åtgärd |
+| --- | --- | --- | --- |
+| `GCP_SA_KEY` | team1-infra | `roles/editor` på hela projektet | Borttagen, oanvänd sedan WIF. 0 nycklar på kontot. |
+| `KUBECONFIG` | team1-infra | Cluster-admin i k3s | Borttagen, oanvänd |
+| `HEADSCALE_API_KEY` | team1-infra | Fullt admin-API i Headscale | Borttagen, oanvänd |
+| `KUBECONFIG` | company-website | Cluster-admin i k3s | Ersatt med GitHub OIDC |
+| `HEADSCALE_API_KEY` | company-website | Fullt admin-API i Headscale | Ersatt med `TS_AUTHKEY` |
+| `HEADSCALE_URL` | båda | Ingen, bara en adress | Flyttad till repo-variabel |
+
+### GitHub OIDC mot k3s
+
+Varje deploy får en kortlivad token från GitHub. k3s API-server kontrollerar den direkt, och ingen nyckel lagras.
+
+1. **k3s litar på GitHub.** I `/etc/rancher/k3s/config.yaml` på primary: `oidc-issuer-url=https://token.actions.githubusercontent.com`, `oidc-client-id=k3s-team1`, `oidc-username-claim=sub`, `oidc-username-prefix=github:`.
+2. **RBAC med minsta behörighet.** Role `github-deployer` i namespace `default`: får uppdatera deployments, services, PVC och ingresses. Får inte läsa secrets, inte ta bort något och inte röra andra namespaces. Verifierat med `kubectl auth can-i`.
+3. **Bara rätt repo och branch.** RoleBinding gäller `github:repo:CHAS-Grupp-1-kurs-6@317844207/company-website@1379369756:ref:refs/heads/main`. GitHub lägger in numeriska ID:n i `sub`, så ett nytt repo med samma namn släpps inte in (skydd mot repojacking).
+4. **Workflowet.** `id-token: write`, hämtar token med audience `k3s-team1`, CA-certifikatet ligger i repo-variabeln `K3S_CA_CERT`.
+
+Första körningen gav `Forbidden`, inte `Unauthorized`. Tokenen godkändes alltså, men användarnamnet innehöll ID:n vi inte räknat med. Efter rättad RoleBinding gick deployen grön på 2 min 27 s.
+
+### Headscale
+
+Headscale saknar stöd för OIDC från GitHub, så vi valde den smalaste nyckel som finns: en pre-auth key som är reusable, ephemeral, taggad `tag:github-runner` och gäller 90 dagar. Den skapades på jumphosten och skickades direkt till `gh secret set` via pipe, så den aldrig visades.
+
+Alla 13 admin-API-nycklar i Headscale återkallades med `headscale apikeys expire --id`.
+
+## Punkt 11: Containerhärdning
+
+Containern kör som UID 10001, kan inte skriva om sin egen kod och kan bara skriva till datavolymen och `/tmp`.
+
+### Dockerfile
+
+| Ändring | Före | Efter |
+| --- | --- | --- |
+| Användare | `USER app` (namn, UID 999) | `USER 10001:10001` (numeriskt, krävs för `runAsNonRoot`) |
+| Konto | `--create-home`, vanligt skal | `--no-create-home`, `/usr/sbin/nologin` |
+| Kodens ägare | `--chown=app:app` (appen kan skriva om koden) | `--chown=root:app` (bara läsbar för appen) |
+| Skrivbar yta | hela `/app` ägd av app | bara `/app/data` |
+| Base image | pinnad på digest | oförändrat, `python:3.13-slim@sha256:3dd7cc...` |
+| `.dockerignore` | fanns | sammanslagen med `.git`, `.github`, `k8s`, `.env` m.fl. |
+| Gunicorn | standard | `--worker-tmp-dir /dev/shm` för read-only rootfs |
+
+### securityContext i `k8s/deployment.yaml`
+
+| Inställning | Skydd |
+| --- | --- |
+| `runAsNonRoot: true`, `runAsUser: 10001` | k8s vägrar starta containern som root |
+| `readOnlyRootFilesystem: true` | En angripare kan inte skriva filer, utom i `/app/data` och `/tmp` |
+| `allowPrivilegeEscalation: false`, `capabilities.drop: ALL` | Blockerar setuid-program och Linux-capabilities |
+| `automountServiceAccountToken: false` | Appen får ingen token till Kubernetes-API:t |
+| `seccompProfile: RuntimeDefault` | Blockerar farliga systemanrop |
+| `limits.memory: 384Mi` | Appen kan inte äta upp minnet på primary (1,9 GiB) |
+| `/tmp` som `emptyDir` i minnet, 64Mi | Skrivbar temp-yta trots read-only rootfs |
+
+PVC-katalogen på primary fick ny ägare (`chown -R 10001:10001`), eftersom k3s lokala lagring ignorerar `fsGroup`.
+
+### Verifiering
+
+| Test | Före | Efter |
+| --- | --- | --- |
+| `id` | `uid=999(app)` | `uid=10001(app)` |
+| Skriva till `/app/wsgi.py` | Skrivbar | SKRIVSKYDDAD |
+| `touch /app/data/test.txt` | OK | OK |
+| `touch /etc/hack` | Permission denied | Read-only file system |
+
+## Punkt 12: Sluttest
+
+Ett skript på Macen, `~/sluttest.sh`, testar alla punkter automatiskt och sparar resultatet i `~/sluttest-<datum>.txt`. Det läser och testar bara, det ändrar ingenting.
+
+Resultat 2026-10-05 01:16: **0 fel.**
+
+| Område | Kontroll | Resultat |
+| --- | --- | --- |
+| 2 | Inga regler mot 0.0.0.0/0 på team1-vpc | ✅ |
+| 2 | Publik SSH till jumphost stängd | ✅ |
+| 2 | team1-cicd saknar `roles/editor` | ✅ |
+| 3 | OS Login aktivt på primary och jumphost | ✅ |
+| 4 | Tailscale subnet route till 10.0.1.3 | ✅ |
+| 5 | `ssh -J` via 100.64.0.1 | ✅ |
+| 6 | Agent forwarding | ✅ |
+| 7 | IAP-SSH till båda VM:arna | ✅ |
+| 8 | `trivy config`: 0 HIGH/CRITICAL | ✅ |
+| 9 | Trivy-steg i deploy-workflowet | ✅ |
+| 10 | Inga statiska admin-nycklar, 0 SA-nycklar, OIDC, senaste deploy grön | ✅ |
+| 11 | Digest-pinning, uid 10001, skrivskyddad kod, read-only rootfs, skrivbar datavolym | ✅ |
+| Övrigt | Primary når internet via Cloud NAT, policy-controller 0 omstarter | ✅ |
+
+Första versionen av skriptet hade ett felaktigt filter i brandväggskontrollen. `gcloud` gav ett fel och ingen utdata, vilket skriptet tolkade som godkänt. Kontrollen rättades. Lärdom: ett test som tolkar tomt svar som godkänt måste också kontrollera att kommandot lyckades.
+
+## Fynd och lärdomar
+
+| Fynd | Allvar | MITRE ATT&CK | Status |
+| --- | --- | --- | --- |
+| `team1-allow-traffic` öppnade jumphosten för all trafik från internet | Kritisk | T1190 Exploit Public-Facing Application, T1110 Brute Force | Åtgärdat |
+| `roles/editor` på hela det delade projektet för CI-konton och alla elever | Kritisk | T1078.004 Valid Accounts: Cloud Accounts | Åtgärdat för team1-cicd |
+| Statisk kubeconfig med cluster-admin i GitHub secrets | Hög | T1552.001 Unsecured Credentials: Credentials In Files | Åtgärdat med OIDC |
+| 13 aktiva Headscale admin-API-nycklar, bara en användes | Hög | T1552 Unsecured Credentials | Återkallade |
+| Oanvända secrets kvar i team1-infra, bl.a. `GCP_SA_KEY` | Hög | T1552 Unsecured Credentials | Borttagna |
+| Discord-webhook i bash-historiken (felaktig `read -s -p`) | Medel | T1552.003 Bash History | Roterad, historik rensad, `HISTCONTROL=ignoreboth` |
+| Policy-controllern kraschade 915 gånger på 10 dagar (cirka 75 h utan internet) | Medel, tillgänglighet | T1499 Endpoint Denial of Service (som effekt) | Åtgärdat med Cloud NAT |
+| Jumphosten var single point of failure: NAT, subnet router och Headscale | Medel | T1557 Adversary-in-the-Middle (vid kompromiss) | NAT flyttad till Cloud NAT |
+| Pre-auth key syntes på en skärmdump | Låg | T1552 Unsecured Credentials | Utbytt och återkallad |
+| Jumphostens tjänstekonto saknar `logging.logEntries.create` | Låg, spårbarhet | T1562.008 Impair Defenses: Disable Cloud Logs (som effekt) | Kvar |
+| k3s OIDC-config och RBAC gjorda för hand, utanför IaC | Låg | – | Kvar |
+
+### Lärdomar
+
+- **Säkerhet mot tillgänglighet.** Cosign-webhooken är failing closed, vilket är rätt. Men ett externt beroende (Sigstores TUF-server) kunde då stoppa alla deployer. Felet syntes som "ImagePullBackOff" och "no endpoints", inte som ett nätverksproblem.
+- **Manuella ändringar ger drift.** Varje `gcloud`-ändring måste in i Terraform, annars återställs den. Vid ett tillfälle hade nästa apply stängt av OS Login.
+- **Hemligheter läcker via vanliga verktyg.** Bash-historik, skärmdumpar och chattar. Skicka nycklar direkt mellan verktyg via pipe, så att de aldrig visas.
+- **Ta bort, återkalla inte bara.** Gamla secrets och nycklar som ingen använder är ren risk.
+
+## Red team-underlag mot andra lag
+
+Saker vi hittade i det delade projektet som är värda att testa i Red Team-fasen:
+
+| Mål | Observation | Vad det kan ge |
+| --- | --- | --- |
+| Team 6 | `team6-allow-traffic` släpper in alla protokoll från 0.0.0.0/0 | Direkt åtkomst till alla tjänster på deras VM:ar |
+| Team 4 och 6 | `team4-cicd` och `team6-cicd` har `roles/editor` på hela projektet | Ett läckt CI-konto kan ändra alla lags miljöer |
+| Alla lag | Default compute-kontot har `roles/editor` | VM med default-kontot och scope `cloud-platform` ger editor via metadata-servern |
+| Alla lag | `default-allow-ssh` och `default-allow-rdp` öppna mot 0.0.0.0/0 på default-nätverket | Påverkar VM:ar som ligger i default-nätverket |
+| Alla lag | Jumphost som NAT, statisk KUBECONFIG, bash-historik med hemligheter | Samma brister som vi hade, sannolikt hos andra |
+
+Kontrollera vilket tjänstekonto motståndarlagets VM:ar kör med:
+
+```bash
+gcloud compute instances list --project=itsx25-lab \
+  --format="table(name,serviceAccounts[0].email,serviceAccounts[0].scopes[0])"
+```
+
+## Kvar att göra
+
+- [ ] Merga PR #26 och sedan PR #25 (2 godkännanden var) och kontrollera att "Deploy Infrastructure" går grön med de nya rollerna.
+- [ ] Lägga in RBAC-manifestet och k3s OIDC-konfigurationen i repot.
+- [ ] Ge jumphostens tjänstekonto `roles/logging.logWriter`.
+- [ ] Importera `team1-allow-internal` till Terraform.
+- [ ] Lägga till Kristoffer i `ssh_users`.
+- [ ] Ta bort den trasiga submodule-referensen `company-website` i app-repot.
+
+
 # Vecka 8 – Threat Intelligence & Halvtidsavstämning
 
 **Datum:** 5/10–9/10
