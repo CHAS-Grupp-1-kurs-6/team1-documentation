@@ -2278,25 +2278,136 @@ gcloud compute instances list --project=itsx25-lab \
 
 # Vecka 8 – Threat Intelligence & Halvtidsavstämning
 
-**Datum:** 5/10–9/10
+# Felsökning och förbättringar – Team 1
 
-## Fokus
+Kurs 6, Avancerad IT-säkerhet · 2026-10-05 · Malcolm Skoglund
 
-- Threat Intelligence
-- MITRE ATT&CK
-- Mapping av findings
-- Threat Intelligence-analys
-- TLP-klassificering
-- Actionable Threat Intelligence
+## Sammanfattning
 
-## Planerade moment
+Efter Leveling up gick vi vidare med felsökning och förbättringar enligt Dennis beslut: ingen extra VM och ingen större primary, och Dependency-Track ska ersättas med den lättviktiga Trivy-CronJob:en från workshop 4. Vi löste en tillgänglighetsincident på primary, tog bort Dependency-Track, lagade ett SBOM-larm som varit tyst i flera dagar, slutförde workshop 4 och åtgärdade tre sårbarheter i webbappen.
 
-### Pass 1 – Workshop
-**5/10 09:00–13:00**
+| Område | Resultat |
+| --- | --- |
+| PR #25, #26, #27 i team1-infra | Mergade, deploy #28 grön med smala roller |
+| Swap-thrashing på primary | Löst, `wa` från 96 % till 0–6 % |
+| Dependency-Track | Borttagen, cirka 300 MB mer ledigt minne |
+| SBOM-larm till Discord | Fungerar igen |
+| Workshop 4 | Inloggningsspårning, SBOM-verifiering, upstream, AI-patchning klart |
+| Sårbarheter i appen | 3 åtgärdade (PR #1 och #2 i company-website) |
 
-- MITRE ATT&CK-mapping av findings från vecka 4–7
-- Threat Intelligence-analys
-- TLP-klassificering
+## 1. Merge av PR #25 och #26
+
+PR #26 mergades före #25. Deployen efter #26 körde då den gamla koden i `main` och återskapade den öppna brandväggsregeln och routen via jumphosten, och stängde av OS Login på primary. Merge-körningen för #25 misslyckades efter 14 sekunder. En manuell körning av "Deploy Infrastructure" (#28) gick grön på 45 sekunder med de nya rollerna och återställde allt.
+
+Lärdom: ordningen mellan PR:er spelar roll. Varje deploy applicerar hela koden i `main`, inte bara ändringen i den senaste PR:en.
+
+### Övrigt i team1-infra
+
+- PR #27: Trivy IaC-scan körs på varje PR och är obligatorisk check i rulesetet `main-protection`, tillsammans med "Format & Validate".
+- Jumphostens tjänstekonto har `roles/logging.logWriter` via Terraform.
+- `team1-allow-internal` är importerad till Terraform.
+- RBAC för `github-deployer` ligger i company-website som `k8s/rbac-github-deployer.yaml`.
+
+## 2. Incident: swap-thrashing på primary
+
+k3s API-server slutade svara. Sluttestet gav tomma svar, och kubectl fick `TLS handshake timeout`.
+
+| Mått | Under incidenten | Efter åtgärd |
+| --- | --- | --- |
+| Load average (2 vCPU) | 8,04 | låg |
+| CPU väntar på disk (`wa`) | 82–96 % | 0–6 % |
+| Läsning från swap (`si`) | 700–900 KB/s | 0 |
+| Använd swap | 347 MiB | 71 MiB |
+
+Orsak: Dependency-Track (Java) och Postgres använde cirka 565 MB på en maskin med 1,9 GB RAM. Utan minnesgräns tog minnet slut, och systemet flyttade sidor mellan RAM och disk hela tiden. k3s databas ligger på samma långsamma disk, så API-servern hann inte svara.
+
+Åtgärd: omstart av primary, nedskalning av Dependency-Track, minnesgräns. Fullständig rapport i `incident-swap-thrashing-team1.md`.
+
+## 3. Dependency-Track borttagen
+
+Innan borttagningen hittade vi att databaslösenordet låg i klartext i Helm-värdena (`apiServer` hade `database.password`). Chartet skriver själv "Not recommended for production". Vi bytte lösenordet i Postgres med `ALTER USER`, flyttade det till en Kubernetes-secret och körde `helm upgrade` med en values-fil utan lösenord.
+
+Dennis beslutade sedan att Dependency-Track ska ersättas. Vi tog bort den med `helm uninstall` och `kubectl delete namespace dtrack`. Det tog också bort Postgres, volymerna, lösenordssecretarna och Helm-historiken med det gamla lösenordet. Tillgängligt minne gick från 546 MiB till 825 MiB.
+
+Ytterligare fynd: `postgres:16` var inte pinnad på digest.
+
+## 4. SBOM-larmet via Trivy-CronJob
+
+CronJob:en `sbom-vulnerability-scanner` i `security-tools` körs varje dag kl. 12:00 UTC:
+
+1. Hittar körande pod för `company-website` och läser dess digest.
+2. Laddar ner den Cosign-attesterade CycloneDX-SBOM:en.
+3. Scannar SBOM:en med Trivy.
+4. Skickar resultatet till Discord.
+
+### Fynd
+
+| Fynd | Allvar | Status |
+| --- | --- | --- |
+| Larmet var tyst i flera dagar. Secreten `discord-webhook-url` var tom (längd 0), jobben 22 h och 46 h tidigare hade `Failed` utan att någon märkte det. | Hög | Åtgärdat |
+| CronJob:en skriver ut webhook-URL:en i poddloggen när curl misslyckas | Medel | Kvar |
+| Trivy installeras via `curl ... install.sh \| sh` från `main` vid varje körning, och `alpine:3.24` är inte pinnad | Medel | Kvar |
+| Webhooken läckte flera gånger under arbetet: skärmdumpar, JSON-sidan i webbläsaren, jobbloggen | Medel | Roterad |
+
+Åtgärd: ny webhook från serverägaren, sparad med `read -rs` och formatkontroll (`^https://discord\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+$`). Testjobb skickade meddelande till Discord.
+
+Lärdom: öppna aldrig en webhook-URL i webbläsaren, och validera formatet innan en hemlighet sparas.
+
+## 5. Workshop 4
+
+### Spåra inloggningar
+
+`gcloud logging read` med OS Login-filtret visar varje inloggning med tid, användare och maskin. Varje inloggning ger två rader.
+
+### Verifiera SBOM-attestering
+
+- `cosign tree` visar både `.att` (SBOM-attesteringen) och `.sig` (signaturen) för imagen som körs.
+- `cosign verify-attestation --type cyclonedx` gav exit 0. Certifikatet visar att attesteringen skapades av `deploy.yml` på `refs/heads/main` i `CHAS-Grupp-1-kurs-6/company-website`, via GitHubs OIDC, och att den finns i transparensloggen.
+
+### Hämta senaste company-website
+
+Lärarens senaste commit (37d97bf, "add customizable email signature previews") fanns redan i `main`. Ingen merge behövdes.
+
+Fynd: remoten `origin` pekade på lärarens git-server, inte på GitHub. En push hade kunnat hamna i lärarens repo. Åtgärd: `origin` borttagen, `remote.pushDefault=github`, och push mot `upstream` spärrad med `git remote set-url --push upstream DISABLED`.
+
+### AI-patchning av sårbarheter
+
+| Fynd | Allvar | OWASP | Åtgärd | PR |
+| --- | --- | --- | --- | --- |
+| Legacy-inloggningen jämförde lösenordet direkt med hashen (pass-the-hash) och kringgick spärren för `flag`-kontot | Kritisk | A07 | Legacy-tabell, migration och `init_legacy_db` borttagna. Alltid `check_password_hash`. | #1 |
+| `edit_profile` saknade ägarkontroll. Vem som helst kunde ändra andras profil och sin egen `role`. | Kritisk | A01 | 403 om man inte äger profilen. `role` och `internal_notes` går inte att ändra via formuläret. | #2 |
+| `view_profile` visade andras `internal_notes` och skickade `password_hash` till mallen | Hög | A01 | Döljs för andra än ägaren | #2 |
+
+Granskat utan fynd:
+
+- `email_preview` använder regex-ersättning mot en vitlista, inte Jinja. Ingen SSTI.
+- Förhandsvisningen sätts med `textContent`. Ingen XSS.
+- Alla SQL-frågor använder `?`-parametrar. Ingen SQL-injektion.
+
+Tester: 11 passed.
+
+MITRE: pass-the-hash motsvarar T1550.002 Use Alternate Authentication Material.
+
+## 6. Övriga fynd
+
+- **Metadata-servern:** jumphostens startup-script kan läsas med `curl` mot 169.254.169.254 inifrån VM:en. Poddar når troligen samma server och därmed tjänstekontots token. MITRE T1552.005. Förbättring: inga hemligheter i startup-scripts och en NetworkPolicy som blockerar poddar mot metadata-servern.
+- **gcloud på servern:** `gcloud compute ssh` från primary skapade ett SSH-nyckelpar där. Nyckeln togs bort. Lärdom: kör gcloud bara på den egna datorn.
+
+## Lärdomar
+
+- Ordningen mellan PR:er avgör vad som deployas.
+- Säkerhetsverktyg utan resursgränser kan slå ut klustret de ska skydda.
+- Ett larm som misslyckas tyst är lika illa som inget larm. Kontrollera att jobben faktiskt lyckas.
+- Hemligheter läcker via skärmdumpar, webbläsare och loggar. Validera och hantera dem utan att de visas.
+- AI hjälpte till att hitta sårbarheterna snabbt, men varje fynd verifierades mot koden och testades innan commit.
+
+## Kvar att göra
+
+- [ ] Merga PR #1 och PR #2 i company-website efter godkännande.
+- [ ] Härda Trivy-CronJob:en: pinnad Trivy-image, `curl -sS -o /dev/null`, kontroll att webhooken inte är tom.
+- [ ] NetworkPolicy som blockerar poddar mot metadata-servern.
+- [ ] Fråga om primary kan få snabbare disk (`pd-balanced`) om fler verktyg ska köras där.
+
 
 ### Pass 2 – Labb & handledning
 **6/10 13:00–17:00**
