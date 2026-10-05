@@ -2054,6 +2054,57 @@ Testade genvägarna i terminalen: `Ctrl+R` (sök i historiken), `Ctrl+A`/`Ctrl+E
 
 När vi använde `history` för att öva hittade vi en Discord-webhook i klartext (se Fynd).
 
+# Status – Team 1
+
+Kurs 6, Avancerad IT-säkerhet · 2026-10-05 · Malcolm Skoglund
+
+## Läget just nu
+
+| Område | Status |
+| --- | --- |
+| Leveling up, 12 uppgifter | Klart, sluttest 0 fel |
+| team1-infra, PR #25, #26, #27 | Mergade, deploy grön |
+| company-website, PR #1 och #2 | Mergade, deploy grön |
+| company-website, PR #3 (säkerhetsmanifest) | Väntar på godkännande |
+| Dependency-Track | Borttagen enligt Dennis, ersatt med Trivy-CronJob |
+| SBOM-larm till Discord | Fungerar, härdat |
+| NetworkPolicy mot metadata-servern | Aktiv i `default` och `security-tools` |
+| Workshop 4 | Klart |
+
+## Dokumentation
+
+Alla filer ligger i `team1-documentation`.
+
+| Fil | Innehåll |
+| --- | --- |
+| `leveling-up-team1.md` | Alla 12 uppgifter, fynd med MITRE-koppling, sluttest |
+| `incident-swap-thrashing-team1.md` | Incidenten när primary överbelastades |
+| `felsokning-forbattringar-team1.md` | Dependency-Track, SBOM-larmet, workshop 4, sårbarheter i appen |
+| `status-team1.md` | Den här filen |
+
+## Ändringar i kväll
+
+- **Trivy-CronJob härdad:** alpine låst till digest, Trivy låst till v0.75.0, `set -eu`, stopp om webhooken saknas, curl skriver inte ut webhooken i loggen. Testjobb gick igenom.
+- **NetworkPolicy `deny-metadata-server`:** poddar når inte längre 169.254.169.254. Internet, Kubernetes-API och Discord fungerar.
+- **PR #3:** CronJob, NetworkPolicy och RBAC ligger i `company-website/k8s/security/` med README. Pipelinen applicerar dem inte, de appliceras manuellt av admin.
+
+## Att göra
+
+- [ ] Godkänna och merga PR #3 i company-website.
+- [ ] Testa i appen att `/profiles/<annat id>/edit` ger 403.
+- [ ] Threat intelligence-rapport mot MITRE ATT&CK, utifrån fyndtabellerna i dokumentationen.
+- [ ] Wazuh, enligt kommande instruktioner.
+- [ ] Red team och purple team.
+- [ ] Individuell slutrapport.
+
+## Viktigt för laget
+
+- Kör `gcloud` bara på er egen dator, aldrig på servrarna.
+- Lägg aldrig in hemligheter på kommandoraden. Använd `read -rs`.
+- Merga PR:er i den ordning som står i beskrivningen. Varje deploy applicerar hela `main`.
+- SSH till servrarna: `gcloud compute ssh team1-primary --project=itsx25-lab --zone=europe-north2-a --tunnel-through-iap`.
+
+
 ## Punkt 2: Brandvägg, Cloud NAT och least privilege
 
 Ingen brandväggsregel på `team1-vpc` är längre öppen mot internet, och CI/CD-kontot har inte längre `roles/editor`.
