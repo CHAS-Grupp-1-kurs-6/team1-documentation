@@ -1,0 +1,445 @@
+# Säkerhetsgranskning och fyndrapport – Team 1
+
+**Kurs:** Kurs 6 – Avancerad IT-säkerhet  
+**Datum:** 8 oktober 2026  
+**Informationsklassning:** TLP:AMBER (föreslagen; fastställs av gruppen/handledaren)  
+**Status:** Uppdaterad fyndrapport med hänvisning till Bilaga A – Verifiering och testbevis. Kontrollera originaltestloggen inför inlämning.
+
+## Sammanfattning
+
+Granskningen omfattar Team 1:s GCP-infrastruktur, Terraform, IAM, SSH/Headscale, Kubernetes/k3s, Flask-applikation, CI/CD, containerhärdning, SBOM och larmkedja. Underlaget redovisar genomförda tester och flera efterföljande förbättringar.
+
+**Identifierade rapporterade fynd:** 20 (kritiska 4, höga 6, medel 6, låga 4). Detta är en sammanställning av dokumenterade fynd, inte en ny fullständig skanning; vissa fynd överlappar.
+
+**Åtgärdsstatus:** 19 fynd har dokumenterade helt eller delvis genomförda åtgärder; kvarstående arbete gäller framför allt reproducerbar OIDC-konfiguration och risker utanför lagets mandat. Detta är en sammanställning av dokumenterade åtgärder, inte en ny driftgranskning. Den största organisatoriska risken är breda IAM-behörigheter i det delade projektet utanför Team 1:s kontroll.
+
+## Metod och avgränsning
+
+Rapporten sammanställer observationer från `team1-allt.md` och gruppens repositories. Inga nya intrångstester, inloggningar eller produktionsändringar har utförts vid rapportsammanställningen. ATT&CK-mappningar beskriver möjliga angreppssätt, inte bevisade angrepp.
+
+## Fynd enligt Dennis mall
+
+### Vulnerability / Finding: F-01 – `team1-allow-traffic` öppnade jumphosten för all trafik från internet
+
+* **ID / asset:** F-01; `team1-allow-traffic` öppnade jumphosten för all trafik från internet.
+* **Severity and impact:** Kritisk. Risk för otillåten åtkomst, informationsläckage eller störning; konkret påverkan beror på åtkomst och exploaterbarhet.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1190 Exploit Public-Facing Application, T1110 Brute Force. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat.
+* **Actions taken:** Åtgärdat. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-02 – `roles/editor` på hela det delade projektet för CI-konton och alla elever
+
+* **ID / asset:** F-02; `roles/editor` på hela det delade projektet för CI-konton och alla elever.
+* **Severity and impact:** Kritisk. Risk för otillåten åtkomst, informationsläckage eller störning; konkret påverkan beror på åtkomst och exploaterbarhet.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1078.004 Valid Accounts: Cloud Accounts. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat för team1-cicd.
+* **Actions taken:** Åtgärdat för team1-cicd. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-03 – Statisk kubeconfig med cluster-admin i GitHub secrets
+
+* **ID / asset:** F-03; Statisk kubeconfig med cluster-admin i GitHub secrets.
+* **Severity and impact:** Hög. Risk för otillåten åtkomst, informationsläckage eller störning; konkret påverkan beror på åtkomst och exploaterbarhet.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1552.001 Unsecured Credentials: Credentials In Files. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat med OIDC.
+* **Actions taken:** Åtgärdat med OIDC. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-04 – 13 aktiva Headscale admin-API-nycklar, bara en användes
+
+* **ID / asset:** F-04; 13 aktiva Headscale admin-API-nycklar, bara en användes.
+* **Severity and impact:** Hög. Risk för otillåten åtkomst, informationsläckage eller störning; konkret påverkan beror på åtkomst och exploaterbarhet.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1552 Unsecured Credentials. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Återkallade.
+* **Actions taken:** Återkallade. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-05 – Oanvända secrets kvar i team1-infra, bl.a. `GCP_SA_KEY`
+
+* **ID / asset:** F-05; Oanvända secrets kvar i team1-infra, bl.a. `GCP_SA_KEY`.
+* **Severity and impact:** Hög. Risk för otillåten åtkomst, informationsläckage eller störning; konkret påverkan beror på åtkomst och exploaterbarhet.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1552 Unsecured Credentials. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Borttagna.
+* **Actions taken:** Borttagna. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-06 – Discord-webhook i bash-historiken (felaktig `read -s -p`)
+
+* **ID / asset:** F-06; Discord-webhook i bash-historiken (felaktig `read -s -p`).
+* **Severity and impact:** Medel. Risk för försämrat skydd, spårbarhet eller tillgänglighet beroende på omständigheterna.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1552.003 Bash History. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Roterad, historik rensad, `HISTCONTROL=ignoreboth`.
+* **Actions taken:** Roterad, historik rensad, `HISTCONTROL=ignoreboth`. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-07 – Policy-controllern kraschade 915 gånger på 10 dagar (cirka 75 h utan internet)
+
+* **ID / asset:** F-07; Policy-controllern kraschade 915 gånger på 10 dagar (cirka 75 h utan internet).
+* **Severity and impact:** Medel. Risk för försämrat skydd, spårbarhet eller tillgänglighet beroende på omständigheterna.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1499 Endpoint Denial of Service (som effekt). Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat med Cloud NAT.
+* **Actions taken:** Åtgärdat med Cloud NAT. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-08 – Jumphosten var single point of failure: NAT, subnet router och Headscale
+
+* **ID / asset:** F-08; Jumphosten var single point of failure: NAT, subnet router och Headscale.
+* **Severity and impact:** Medel. Risk för försämrat skydd, spårbarhet eller tillgänglighet beroende på omständigheterna.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1557 Adversary-in-the-Middle (vid kompromiss). Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** NAT flyttad till Cloud NAT.
+* **Actions taken:** NAT flyttad till Cloud NAT. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-09 – Pre-auth key syntes på en skärmdump
+
+* **ID / asset:** F-09; Pre-auth key syntes på en skärmdump.
+* **Severity and impact:** Låg. Risk för försämrat skydd, spårbarhet eller tillgänglighet beroende på omständigheterna.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1552 Unsecured Credentials. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Utbytt och återkallad.
+* **Actions taken:** Utbytt och återkallad. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-10 – Jumphostens tjänstekonto saknar `logging.logEntries.create`
+
+* **ID / asset:** F-10; Jumphostens tjänstekonto saknar `logging.logEntries.create`.
+* **Severity and impact:** Låg. Risk för försämrat skydd, spårbarhet eller tillgänglighet beroende på omständigheterna.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1562.008 Impair Defenses: Disable Cloud Logs (som effekt). Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat med roles/logging.logWriter (PR #26 i `team1-infra`).
+* **Actions taken:** Åtgärdat med roles/logging.logWriter (PR #26 i `team1-infra`). Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-11 – k3s OIDC-config och RBAC gjorda för hand, utanför IaC
+
+* **ID / asset:** F-11; k3s OIDC-config och RBAC gjorda för hand, utanför IaC.
+* **Severity and impact:** Låg. Risk för försämrat skydd, spårbarhet eller tillgänglighet beroende på omständigheterna.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** No technique mapped. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Delvis: RBAC-manifest i repo; OIDC-serverkonfiguration behöver driftförvaltning.
+* **Actions taken:** Delvis: RBAC-manifest i repo; OIDC-serverkonfiguration behöver driftförvaltning. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-12 – Legacy-inloggning accepterade hash
+
+* **ID / asset:** F-12; Legacy-inloggning accepterade hash.
+* **Severity and impact:** Kritisk. Risk för otillåten åtkomst, informationsläckage eller störning; konkret påverkan beror på åtkomst och exploaterbarhet.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1550.002 (analogi, ej observerad attack). Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat; PR #1.
+* **Actions taken:** Åtgärdat; PR #1. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Automatiska tester 2026-10-08: `tests/test_access_control.py` 4/4 godkända, hela testsviten 15/15. Testerna omfattar HTTP 403 vid GET/POST mot annans redigeringssida, redigering av egen profil, skyddad roll och dolda interna anteckningar. Se Bilaga A.3 och company-website PR #4. Dessa tester verifierar åtkomstkontroll, inte ensamma att alla historiska inloggningsbrister är åtgärdade.
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-13 – Profilredigering utan ägarkontroll
+
+* **ID / asset:** F-13; Profilredigering utan ägarkontroll.
+* **Severity and impact:** Kritisk. Risk för otillåten åtkomst, informationsläckage eller störning; konkret påverkan beror på åtkomst och exploaterbarhet.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** Ingen teknik mappad. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat; PR #2.
+* **Actions taken:** Åtgärdat; PR #2. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Automatiska tester 2026-10-08: `tests/test_access_control.py` 4/4 godkända, hela testsviten 15/15. Testerna omfattar HTTP 403 vid GET/POST mot annans redigeringssida, redigering av egen profil, skyddad roll och dolda interna anteckningar. Se Bilaga A.3 och company-website PR #4. Dessa tester verifierar åtkomstkontroll, inte ensamma att alla historiska inloggningsbrister är åtgärdade.
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-14 – Profilvisning läckte interna fält
+
+* **ID / asset:** F-14; Profilvisning läckte interna fält.
+* **Severity and impact:** Hög. Risk för otillåten åtkomst, informationsläckage eller störning; konkret påverkan beror på åtkomst och exploaterbarhet.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** Ingen teknik mappad. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat; PR #2.
+* **Actions taken:** Åtgärdat; PR #2. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Automatiska tester 2026-10-08: `tests/test_access_control.py` 4/4 godkända, hela testsviten 15/15. Testerna omfattar HTTP 403 vid GET/POST mot annans redigeringssida, redigering av egen profil, skyddad roll och dolda interna anteckningar. Se Bilaga A.3 och company-website PR #4. Dessa tester verifierar åtkomstkontroll, inte ensamma att alla historiska inloggningsbrister är åtgärdade.
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-15 – SBOM-larm misslyckades utan uppföljning
+
+* **ID / asset:** F-15; SBOM-larm misslyckades utan uppföljning.
+* **Severity and impact:** Hög. Risk för otillåten åtkomst, informationsläckage eller störning; konkret påverkan beror på åtkomst och exploaterbarhet.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** Ingen teknik mappad. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat.
+* **Actions taken:** Åtgärdat. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-16 – CronJob kunde exponera webhook i felutskrift
+
+* **ID / asset:** F-16; CronJob kunde exponera webhook i felutskrift.
+* **Severity and impact:** Medel. Risk för försämrat skydd, spårbarhet eller tillgänglighet beroende på omständigheterna.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1552 (potentiell exponering). Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat.
+* **Actions taken:** Åtgärdat. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-17 – CronJob installerade Trivy dynamiskt
+
+* **ID / asset:** F-17; CronJob installerade Trivy dynamiskt.
+* **Severity and impact:** Medel. Risk för försämrat skydd, spårbarhet eller tillgänglighet beroende på omständigheterna.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** Ingen teknik mappad. Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat.
+* **Actions taken:** Åtgärdat. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-18 – Databaslösenord i Helm-värden
+
+* **ID / asset:** F-18; Databaslösenord i Helm-värden.
+* **Severity and impact:** Hög. Risk för otillåten åtkomst, informationsläckage eller störning; konkret påverkan beror på åtkomst och exploaterbarhet.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1552.001 (potentiell exponering). Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat; Dependency-Track avinstallerad.
+* **Actions taken:** Åtgärdat; Dependency-Track avinstallerad. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-19 – Åtkomst till metadata-server från poddar
+
+* **ID / asset:** F-19; Åtkomst till metadata-server från poddar.
+* **Severity and impact:** Medel. Risk för försämrat skydd, spårbarhet eller tillgänglighet beroende på omständigheterna.
+* **Evidence:** Dokumenterad observation i `team1-allt.md` (fyndtabell och tillhörande tekniskt avsnitt). Se även berörda PR:er och CI-loggar; råbevis bör bifogas vid slutgranskning.
+* **MITRE ATT&CK:** T1552.005 (möjlig konsekvens). Mappningen är en möjlig motsvarighet, inte belägg för attacker.
+* **TTP summary:** Ingen faktisk angriparaktivitet dokumenterad. Beskrivningen gäller en möjlig angripares utnyttjande av bristen.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll den dokumenterade säkerhetsåtgärden, kontrollera konfigurationsdrift och genomför regelbundna omtester.
+* **Feasibility:** Åtgärdat med NetworkPolicy.
+* **Actions taken:** Åtgärdat med NetworkPolicy. Exakta ägare/datum och PR-diff kompletteras vid gruppens slutgranskning.
+* **Code/config diff:** Se berört repo och dess PR-historik; undvik att inkludera hemligheter i diffutdrag.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända. Enda avvikelse: policy-controllern startar om vid schemalagd VM-start; accepterad risk eftersom tjänsten återhämtar sig automatiskt. Se Bilaga A.2 och `sluttest-rapport-2026-10-08-1231.txt` (originalfilen behöver bifogas).
+* **AI use (if applicable):** Claude användes enligt gruppens uppgift för stöd i arbetet; ChatGPT användes för rapportsammanställning. Gruppens egen kontroll av kod, kommandon, tester och CI ska framgå av bilagda bevis.
+
+### Vulnerability / Finding: F-20 – Ingen IaC-scanning i CI
+
+* **ID / asset:** F-20; Terraform-repot `team1-infra`, pull request-flödet och skydd av `main`.
+* **Severity and impact:** Låg. Utan automatiserad IaC-scanning kunde felkonfigurationer i Terraform nå huvudgrenen utan en säkerhetskontroll. Allvarlighetsgraden av ett faktiskt fel beror på vilken resurs som påverkas.
+* **Evidence:** Dokumentationen anger att Trivy IaC-scanning infördes i PR #27 och blev en obligatorisk check i `main-protection`; se även Bilaga A.2 för resultatet `trivy config` (0 HIGH/CRITICAL).
+* **MITRE ATT&CK:** No technique mapped. Avsaknad av en förebyggande CI-kontroll är inte i sig en observerad angriparteknik.
+* **TTP summary:** Ingen attack observerad. En felkonfiguration som passerar utan scanning kan i ett senare skede skapa en exploaterbar exponeringsyta.
+* **TLP:** TLP:AMBER (föreslagen klassning).
+* **Recommendation:** Behåll IaC-scanning som obligatorisk PR-kontroll, uppdatera scanner och regelverk samt följ upp MEDIUM/LOW-fynd riskbaserat.
+* **Feasibility:** Implementerat enligt dokumentationen; PR #27 i `team1-infra`.
+* **Actions taken:** Trivy IaC-scan lades till för pull requests och sattes som obligatorisk check i rulesetet `main-protection` genom PR #27.
+* **Code/config diff:** `team1-infra` PR #27: https://github.com/CHAS-Grupp-1-kurs-6/team1-infra/pull/27. Före: ingen obligatorisk IaC-scan i CI. Efter: Trivy-kontroll vid PR och krav i branch protection.
+* **Verification:** Sluttest 2026-10-08 kl. 12:31: 27 av 28 kontroller godkända; `trivy config` visade 0 HIGH/CRITICAL. Se Bilaga A.2. Obligatorisk PR-check anges i arbetsunderlaget; dess aktuella GitHub-inställning har inte kontrollerats på nytt i denna rapportsammanställning.
+* **AI use (if applicable):** Claude användes som stöd i säkerhetsarbetet och ChatGPT för rapportstruktur. Teamet ansvarade för ändringar och verifiering av IaC-scanningen; AI-text är inte självständigt testbevis.
+
+## Kvarvarande risker och beroenden
+
+- **IAM i delat projekt:** `roles/editor` för andra deltagare/CI-konton och default compute-kontot ligger utanför Team 1:s egen åtgärdsbehörighet. Begär central IAM-granskning och least privilege.
+- **Resursbrist:** `team1-primary` har cirka 1,9 GiB RAM. Swap-thrashing inträffade; Dependency-Track togs senare bort enligt handledarbeslut, men låg marginal kvarstår.
+- **Wazuh:** ännu inte infört enligt senaste statusfilen; loggning och detektion har därför en lucka.
+- **Policy-controller:** startar om en gång per dygn när schemat startar VM:en. Accepterad risk; tjänsten återhämtar sig automatiskt (Bilaga A.4).
+- **OIDC-drift:** k3s OIDC-serverkonfiguration gjordes manuellt och behöver hanteras reproducerbart.
+- **PR #3 och HTTP 403:** PR #3 mergad 2026-10-05 enligt uppgift; HTTP 403 verifierat 2026-10-08 med automatiska tester. Dessa är slutförda kontroller, inte kvarstående risker.
+
+## Verifieringsbilaga
+
+Se `bilaga-verifiering-team1.md` (Bilaga A), inklusive testomfattning, avvikelse och hänvisning till originaltestloggen. Bilagan är ett dokumenterat testunderlag; originalfilen med sluttestresultat ingick inte bland de uppladdade filerna och har därför inte granskats direkt här.
+
+## Källor och hur de används
+
+1. **MITRE ATT&CK** – stöd för att beskriva möjliga taktiker/tekniker, utan att påstå att en attack har skett. https://attack.mitre.org/
+2. **OWASP Top 10** – kategorisering av autentiserings- och åtkomstkontrollbrister i Flask-appen. https://owasp.org/www-project-top-ten/
+3. **CIS Google Cloud Computing Platform Benchmark** – referensram för IAM, nätverk och loggning i GCP. https://www.cisecurity.org/benchmark/google_cloud_computing_platform
+4. **Kubernetes Pod Security Standards** – jämförelse med containerhärdning (non-root, capabilities, seccomp). https://kubernetes.io/docs/concepts/security/pod-security-standards/
+
+## AI-användning och kvalitetskontroll
+
+Claude har enligt gruppens uppgift använts som hjälp under arbetet. I arbetsunderlaget anges att AI stödde identifiering och patchning av kodbrister; gruppen granskade kod och körde tester (senaste redovisade körning: 15/15 godkända, varav 4/4 åtkomstkontroll). ChatGPT har använts för att strukturera denna rapport enligt Dennis tolv fält. AI-genererade formuleringar utgör inte självständiga bevis. Gruppmedlemmar behöver granska slutsatser, länka till faktiska testresultat och skriva om vid behov.
+
+## Slutkontroll före publicering
+
+- [x] Bekräfta PR #3:s merge-status och lägg till PR-länk: https://github.com/CHAS-Grupp-1-kurs-6/company-website/pull/3 (merge enligt tillhandahållet underlag).
+- [x] Bifoga konkret 403-test: GET och POST mot annans profil ger HTTP 403 (Bilaga A.3; PR #4).
+- [ ] Sök efter nycklar, lösenord, tokens och webhook-URL:er i rapport och bilagor; publicera aldrig värden.
+- [ ] Håll Red Team-observationer i separat, åtkomstbegränsat dokument (inte i denna rapport).
+- [ ] Bekräfta deadline, rapporttyp (individuell/grupp), filnamn och TLP med Dennis.
+- [ ] Gruppmedlemmar granskar respektive fynd och anger ansvariga samt länkar till exakta PR:er, commits och testloggar.
+
+## Interna projektkällor
+
+- https://github.com/CHAS-Grupp-1-kurs-6/company-website
+- https://github.com/CHAS-Grupp-1-kurs-6/team1-documentation
+- https://github.com/CHAS-Grupp-1-kurs-6/team1-infra
+
+# Bilaga A – Verifiering och testbevis
+
+**Team 1 · Kurs 6 – Avancerad IT-säkerhet**
+**Verifieringsdatum:** 2026-10-08
+**Informationsklassning:** TLP:AMBER
+
+Bilagan redovisar de tester som verifierar åtgärderna i rapporten. Hänvisa till den här bilagan under fältet **Verification** för respektive fynd.
+
+## A.1 Översikt
+
+| Test | Omfattning | Resultat | Bevis |
+| --- | --- | --- | --- |
+| Sluttest av infrastruktur | Brandvägg, IAM, OS Login, Tailscale, IAP, IaC-scanning, OIDC, containerhärdning, Cloud NAT | 27 av 28 godkända | `sluttest-rapport-2026-10-08-1231.txt` |
+| Applikationstester | Hela testsviten för `company-website` | 15 av 15 godkända | `pytest`-körning 2026-10-08 |
+| Åtkomstkontroll | Profilredigering, rollskydd, interna anteckningar | 4 av 4 godkända | `tests/test_access_control.py` |
+
+## A.2 Sluttest av infrastruktur
+
+Körd 2026-10-08 12:31 med `sluttest.sh`. Skriptet läser och testar, det ändrar ingenting i miljön.
+
+| Område | Kontroll | Resultat |
+| --- | --- | --- |
+| Brandvägg | Inga regler mot 0.0.0.0/0 på `team1-vpc` | Godkänd |
+| Brandvägg | Publik SSH till jumphosten stängd | Godkänd |
+| IAM | `team1-cicd` saknar `roles/editor` | Godkänd |
+| OS Login | Aktivt på primary och jumphost | Godkänd |
+| Tailscale | Subnet route från klient till primary | Godkänd |
+| Jump host | `ssh -J` via jumphostens Tailscale-adress | Godkänd |
+| Agent forwarding | Nyckel tillgänglig via agent på primary | Godkänd |
+| IAP | SSH via IAP till båda VM:arna | Godkänd |
+| IaC-scanning | `trivy config`: 0 HIGH/CRITICAL | Godkänd |
+| Pipeline | Trivy-steg finns i deploy-workflow | Godkänd |
+| Hemligheter | Inga statiska admin-nycklar i GitHub | Godkänd |
+| Hemligheter | 0 användarhanterade nycklar på `team1-cicd` | Godkänd |
+| OIDC | `company-website` använder `id-token: write` | Godkänd |
+| Deploy | Senaste deploy av `company-website` grön | Godkänd |
+| Container | Base image pinnad på digest | Godkänd |
+| Container | Kör som UID 10001 | Godkänd |
+| Container | Applikationskoden skrivskyddad | Godkänd |
+| Container | Root-filsystemet read-only | Godkänd |
+| Container | Datavolymen skrivbar | Godkänd |
+| Nätverk | Primary når internet via Cloud NAT (HTTP 200) | Godkänd |
+| Tillgänglighet | Policy-controller utan omstarter | Avvikelse, se A.4 |
+
+## A.3 Åtkomstkontroll i applikationen
+
+Testerna körs mot en tillfällig databas med två testanvändare och påverkar inte produktionsdata.
+
+| Test | Förväntat | Resultat |
+| --- | --- | --- |
+| Användare A öppnar B:s redigeringssida (GET) | HTTP 403 | Godkänd |
+| Användare A skickar ändring till B:s profil (POST) | HTTP 403 | Godkänd |
+| Användare A redigerar sin egen profil | HTTP 302, ändring sparas | Godkänd |
+| Användare A försöker ändra sin egen roll | Rollen oförändrad | Godkänd |
+| Användare A visar B:s profil | B:s interna anteckningar visas inte | Godkänd |
+
+Hela testsviten: 15 av 15 godkända.
+
+## A.4 Avvikelser och accepterade risker
+
+| Avvikelse | Orsak | Bedömning |
+| --- | --- | --- |
+| Policy-controllern visar 3 omstarter på 3 dagar | Schemat `team1-daily-schedule` stänger av VM:arna nattligen. Vid uppstart startar podden innan nätverket är redo och startas om en gång. | Accepterad risk. Tjänsten återhämtar sig automatiskt inom en minut. |
+| Lokal testmiljö kör Python 3.9, produktion kör 3.13 | Äldre lokal virtuell miljö | Låg risk. Rekommendation: bygg om lokal miljö med Python 3.13. |
+
+## A.5 Text att använda under Verification
+
+**För infrastrukturfynden:**
+
+> Sluttest 2026-10-08 12:31: 27 av 28 kontroller godkända. Enda avvikelse är policy-controllerns dagliga omstart vid schemalagd VM-start, som är en accepterad risk. Se Bilaga A.2.
+
+**För applikationsfynden (åtkomstkontroll):**
+
+> Automatiska tester 2026-10-08: 4 av 4 godkända i `tests/test_access_control.py`, totalt 15 av 15. Se Bilaga A.3.
+
+## A.6 Ändringar i rapporten
+
+| Plats | Ändring |
+| --- | --- |
+| F-10, Feasibility och Actions taken | Ändra PR-hänvisningen till PR #26 i `team1-infra` |
+| Nytt fynd F-20 | Ingen IaC-scanning i CI. Låg. Åtgärdat i PR #27 i `team1-infra`, obligatorisk check i `main-protection`. |
+| Sammanfattning | Uppdatera antalet fynd till 20 |
+| Kvarvarande risker | Ersätt raden om PR #3 och 403: PR #3 mergad 2026-10-05, 403 verifierat 2026-10-08 |
+| Kvarvarande risker | Lägg till policy-controllerns dagliga omstart som accepterad risk |
+| Slutkontroll | Bocka av punkterna om PR #3 och 403-testet |
